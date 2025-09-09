@@ -4,7 +4,8 @@ import re
 import traceback
 from typing import List, Dict, Any, Optional
 import logging
-
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Tuple
 # Configurar logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -12,6 +13,88 @@ logger = logging.getLogger(__name__)
 class BalanceExtractorEnhanced:
     def __init__(self):
         self.columns = ['CODIGO', 'NOMBRE', 'SALDO ANTERIOR', 'CARGOS', 'ABONOS', 'SALDO ACTUAL']
+        self.extracted_date = None
+    
+    def _extract_date_from_pdf(self, pdf) -> str:
+        """
+        Extrae la fecha del balance desde las primeras páginas del PDF
+        """
+        date_patterns = [
+            r'(?:AL\s+|FECHA\s+|CORTE\s+|PERIODO\s+)?(?:DEL?\s+)?(\d{1,2})\s+(?:DE\s+)?(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s+(?:DEL?\s+)?(\d{4})',
+            r'(?:AL\s+|FECHA\s+|CORTE\s+)?(\d{1,2})[/-](\d{1,2})[/-](\d{4})',
+            r'(?:AL\s+|FECHA\s+|CORTE\s+)?(\d{1,2})\.(\d{1,2})\.(\d{4})',
+            r'BALANCE\s+(?:DE\s+)?(?:COMPROBACION\s+)?(?:AL\s+)?(\d{1,2})\s+(?:DE\s+)?(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s+(?:DEL?\s+)?(\d{4})',
+        ]
+        
+        months_spanish = {
+            'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
+            'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
+            'SEPTIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
+        }
+        
+        # Buscar en las primeras 3 páginas
+        for page_num in range(min(3, len(pdf.pages))):
+            page = pdf.pages[page_num]
+            text = page.extract_text()
+            
+            if not text:
+                continue
+                
+            # Limpiar texto para mejor búsqueda
+            clean_text = ' '.join(text.upper().split())
+            logger.debug(f"Buscando fecha en página {page_num + 1}: {clean_text[:200]}...")
+            
+            for pattern in date_patterns:
+                matches = re.finditer(pattern, clean_text, re.IGNORECASE)
+                
+                for match in matches:
+                    try:
+                        groups = match.groups()
+                        
+                        if len(groups) == 3:
+                            if groups[1] in months_spanish:
+                                # Formato con mes en texto
+                                day = groups[0].zfill(2)
+                                month = months_spanish[groups[1]]
+                                year = groups[2]
+                                formatted_date = f"{day}/{month}/{year}"
+                                logger.info(f"Fecha encontrada: {formatted_date}")
+                                return formatted_date
+                            elif groups[1].isdigit():
+                                # Formato DD/MM/YYYY o similar
+                                day = groups[0].zfill(2)
+                                month = groups[1].zfill(2)
+                                year = groups[2]
+                                formatted_date = f"{day}/{month}/{year}"
+                                logger.info(f"Fecha encontrada: {formatted_date}")
+                                return formatted_date
+                                
+                    except Exception as e:
+                        logger.debug(f"Error procesando match de fecha: {e}")
+                        continue
+        
+        # Si no encuentra fecha, usar fecha actual
+        current_date = datetime.now().strftime("%d/%m/%Y")
+        logger.warning(f"No se encontró fecha en el PDF, usando fecha actual: {current_date}")
+        return current_date
+    
+    def get_excel_filename(self, original_pdf_path: str = None) -> str:
+        """
+        Genera el nombre del archivo Excel basado en la fecha extraída
+        """
+        if self.extracted_date:
+            try:
+                # Convertir fecha a formato para nombre de archivo (YYYY-MM-DD)
+                date_parts = self.extracted_date.split('/')
+                if len(date_parts) == 3:
+                    day, month, year = date_parts
+                    filename_date = f"{year}-{month}-{day}"
+                    return f"Balance_Comprobacion_{filename_date}.xlsx"
+            except:
+                pass
+        
+        # Fallback si no hay fecha extraída
+        return f"Balance_Comprobacion_{datetime.now().strftime('%Y-%m-%d')}.xlsx"
         
     def extract_balance_data(self, pdf_path: str) -> List[Dict[str, Any]]:
         """
@@ -22,9 +105,12 @@ class BalanceExtractorEnhanced:
         try:
             with pdfplumber.open(pdf_path) as pdf:
                 logger.info(f"Procesando PDF con {len(pdf.pages)} páginas")
+                self.extracted_date = self._extract_date_from_pdf(pdf)
+                logger.info(f"Fecha extraída del PDF: {self.extracted_date}")
                 
                 for page_num, page in enumerate(pdf.pages, 1):
                     logger.info(f"Procesando página {page_num}")
+                    
                     
                     # Extraer texto de la página
                     text = page.extract_text()
@@ -278,6 +364,20 @@ class BalanceExtractorEnhanced:
                 # Obtener workbook y worksheet para formatear
                 workbook = writer.book
                 worksheet = writer.sheets['Balance_Comprobacion']
+                
+                if self.extracted_date:
+                    # Formato para la celda de fecha
+                    date_format = workbook.add_format({
+                        'bold': True,
+                        'font_size': 12,
+                        'bg_color': '#E6F3FF',
+                        'border': 1,
+                        'align': 'center'
+                    })
+                    
+                    worksheet.write('H1', 'FECHA DEL BALANCE:', date_format)
+                    worksheet.write('I1', self.extracted_date, date_format)
+                    worksheet.set_column('H:I', 18)
                 
                 # Formatos
                 money_format = workbook.add_format({

@@ -3,6 +3,7 @@ from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
 import threading
 import os
+import pdfplumber
 from test_pdf import BalanceExtractorEnhanced  # Importamos tu algoritmo
 
 class PDFToExcelApp:
@@ -219,10 +220,22 @@ class PDFToExcelApp:
     def auto_generate_output_name(self, input_file):
         """Generar automáticamente el nombre del archivo de salida"""
         input_path = Path(input_file)
-        output_name = f"{input_path.stem}_balance_extraido.xlsx"
-        output_path = input_path.parent / output_name
+        
+        try:
+            from test_pdf import BalanceExtractorEnhanced
+            temp_extractor = BalanceExtractorEnhanced()
+            
+            with pdfplumber.open(input_file) as pdf:
+                temp_extractor.extracted_date = temp_extractor._extract_date_from_pdf(pdf)
+            
+            suggested_name = temp_extractor.get_excel_filename()
+            output_path = input_path.parent / suggested_name
+        
+        except Exception as e:
+            output_name = f"{input_path.stem}_balance_extraido.xlsx"
+            output_path = input_path.parent / output_name
         self.output_file.set(str(output_path))
-    
+
     def validate_inputs(self):
         """Validar las entradas del usuario"""
         if not self.selected_file.get():

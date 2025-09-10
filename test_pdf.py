@@ -16,35 +16,45 @@ class BalanceExtractorEnhanced:
         self.extracted_date = None
     
     def _extract_date_from_pdf(self, pdf) -> str:
-        """
-        Extrae la fecha del balance desde las primeras páginas del PDF
-        """
-        date_patterns = [
-            r'(?:AL\s+|FECHA\s+|CORTE\s+|PERIODO\s+)?(?:DEL?\s+)?(\d{1,2})\s+(?:DE\s+)?(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s+(?:DEL?\s+)?(\d{4})',
-            r'(?:AL\s+|FECHA\s+|CORTE\s+)?(\d{1,2})[/-](\d{1,2})[/-](\d{4})',
-            r'(?:AL\s+|FECHA\s+|CORTE\s+)?(\d{1,2})\.(\d{1,2})\.(\d{4})',
-            r'BALANCE\s+(?:DE\s+)?(?:COMPROBACION\s+)?(?:AL\s+)?(\d{1,2})\s+(?:DE\s+)?(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)\s+(?:DEL?\s+)?(\d{4})',
+        # Patrón específico para el título del balance
+        
+        title_date_patterns = [
+            # Patrón principal: "BALANCE DE COMPROBACION DIARIO EN MONEDA NACIONAL AL DIA DD/MM/YYYY"
+            r'BALANCE\s+DE\s+COMPROBACION\s+DIARIO\s+EN\s+MONEDA\s+NACIONAL\s+AL\s+DIA\s+(\d{1,2})/(\d{1,2})/(\d{4})',
+            r'BALANCE\s+DE\s+COMPROBACION\s+.*?AL\s+DIA\s+(\d{1,2})/(\d{1,2})/(\d{4})',
+            r'BALANCE\s+DE\s+COMPROBACION\s+.*?AL\s+(\d{1,2})/(\d{1,2})/(\d{4})',
+            # Variaciones del patrón
+            r'BALANCE.*?COMPROBACION.*?AL\s+DIA\s+(\d{1,2})/(\d{1,2})/(\d{4})',
+            r'BALANCE.*?COMPROBACION.*?AL\s+(\d{1,2})/(\d{1,2})/(\d{4})',
         ]
         
-        months_spanish = {
-            'ENERO': '01', 'FEBRERO': '02', 'MARZO': '03', 'ABRIL': '04',
-            'MAYO': '05', 'JUNIO': '06', 'JULIO': '07', 'AGOSTO': '08',
-            'SEPTIEMBRE': '09', 'OCTUBRE': '10', 'NOVIEMBRE': '11', 'DICIEMBRE': '12'
-        }
         
-        # Buscar en las primeras 3 páginas
+        # Patrones alternativos con formato de fecha con puntos o guiones
+        alternative_patterns = [
+            r'BALANCE\s+DE\s+COMPROBACION\s+DIARIO\s+EN\s+MONEDA\s+NACIONAL\s+AL\s+DIA\s+(\d{1,2})\.(\d{1,2})\.(\d{4})',
+            r'BALANCE\s+DE\s+COMPROBACION\s+DIARIO\s+EN\s+MONEDA\s+NACIONAL\s+AL\s+DIA\s+(\d{1,2})-(\d{1,2})-(\d{4})',
+            r'BALANCE.*?COMPROBACION.*?AL\s+DIA\s+(\d{1,2})\.(\d{1,2})\.(\d{4})',
+            r'BALANCE.*?COMPROBACION.*?AL\s+DIA\s+(\d{1,2})-(\d{1,2})-(\d{4})',
+        ]
+        
+        # Combinar todos los patrones
+        all_patterns = title_date_patterns + alternative_patterns
+        
+        # Buscar en las primeras 3 páginas (principalmente la primera)
         for page_num in range(min(3, len(pdf.pages))):
             page = pdf.pages[page_num]
             text = page.extract_text()
             
             if not text:
                 continue
-                
-            # Limpiar texto para mejor búsqueda
-            clean_text = ' '.join(text.upper().split())
-            logger.debug(f"Buscando fecha en página {page_num + 1}: {clean_text[:200]}...")
             
-            for pattern in date_patterns:
+            # Limpiar texto para mejorar la búsqueda
+            clean_text = ' '.join(text.upper().split())
+            logger.debug(f"Buscando fecha en página {page_num + 1}")
+            logger.debug(f"Texto limpio: {clean_text[:300]}...")
+            
+            # Buscar el patrón específico del título
+            for i, pattern in enumerate(all_patterns):
                 matches = re.finditer(pattern, clean_text, re.IGNORECASE)
                 
                 for match in matches:
@@ -52,25 +62,57 @@ class BalanceExtractorEnhanced:
                         groups = match.groups()
                         
                         if len(groups) == 3:
-                            if groups[1] in months_spanish:
-                                # Formato con mes en texto
-                                day = groups[0].zfill(2)
-                                month = months_spanish[groups[1]]
-                                year = groups[2]
-                                formatted_date = f"{day}/{month}/{year}"
-                                logger.info(f"Fecha encontrada: {formatted_date}")
-                                return formatted_date
-                            elif groups[1].isdigit():
-                                # Formato DD/MM/YYYY o similar
-                                day = groups[0].zfill(2)
-                                month = groups[1].zfill(2)
-                                year = groups[2]
-                                formatted_date = f"{day}/{month}/{year}"
-                                logger.info(f"Fecha encontrada: {formatted_date}")
-                                return formatted_date
-                                
+                            day = groups[0].zfill(2)
+                            month = groups[1].zfill(2)
+                            year = groups[2]
+                            formatted_date = f"{day}/{month}/{year}"
+                            
+                            logger.info(f"Fecha encontrada en el título (patrón {i+1}): {formatted_date}")
+                            logger.info(f"Texto completo del match: {match.group(0)}")
+                            return formatted_date
+                    
                     except Exception as e:
                         logger.debug(f"Error procesando match de fecha: {e}")
+                        continue
+        # Si no encuentra la fecha en el título principal, buscar patrones más genéricos pero priorizando fechas con formato DD/MM/YYYY
+        logger.warning("No se encontró la fecha en el título principal, buscando patrones alternativos...")
+        
+        generic_patterns = [
+            r'AL\s+(\d{1,2})/(\d{1,2})/(\d{4})',
+            r'(\d{1,2})/(\d{1,2})/(\d{4})',
+            r'(\d{1,2})\.(\d{1,2})\.(\d{4})',
+            r'(\d{1,2})-(\d{1,2})-(\d{4})',
+        ]
+        
+        for page_num in range(min(3, len(pdf.pages))):
+            page = pdf.pages[page_num]
+            text = page.extract_text()
+            
+            if not text:
+                continue
+            
+            clean_text = ' '.join(text.upper().split())
+            
+            for pattern in generic_patterns:
+                matches = re.finditer(pattern, clean_text)
+                
+                for match in matches:
+                    try:
+                        groups = match.groups()
+                        
+                        if len(groups) == 3:
+                            day = int(groups[0])
+                            month = int(groups[1])
+                            year = int(groups[2])
+                            
+                            # Validar que sea una fecha válida
+                            if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
+                                formatted_date = f"{day:02d}/{month:02d}/{year}"
+                                logger.info(f"Fecha alternativa encontrada: {formatted_date}")
+                                return formatted_date
+                    
+                    except Exception as e:
+                        logger.debug(f"Error procesando fecha alternativa: {e}")
                         continue
         
         # Si no encuentra fecha, usar fecha actual

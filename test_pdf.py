@@ -385,9 +385,7 @@ class BalanceExtractorEnhanced:
             return ""
     
     def save_to_excel(self, data: List[Dict[str, Any]], output_path: str):
-        """
-        Guarda los datos extraídos en un archivo Excel con formato mejorado
-        """
+        
         try:
             if not data:
                 logger.warning("No hay datos para guardar")
@@ -401,45 +399,49 @@ class BalanceExtractorEnhanced:
             
             # Guardar en Excel con formato
             with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                df.to_excel(writer, sheet_name='Balance_Comprobacion', index=False)
+                # Escribir los datos empezando desde la fila 2 (índice 1)
+                df.to_excel(writer, sheet_name='Balance_Comprobacion', index=False, startrow=1)
                 
                 # Obtener workbook y worksheet para formatear
                 workbook = writer.book
                 worksheet = writer.sheets['Balance_Comprobacion']
                 
                 if self.extracted_date:
-                    # Formato para la celda de fecha
+                    # Formato para la celda de fecha combinada
                     date_format = workbook.add_format({
                         'bold': True,
-                        'font_size': 12,
+                        'font_size': 14,
                         'bg_color': '#E6F3FF',
                         'border': 1,
-                        'align': 'center'
+                        'align': 'center',
+                        'valign': 'vcenter'
                     })
                     
-                    worksheet.write('H1', 'FECHA DEL BALANCE:', date_format)
-                    worksheet.write('I1', self.extracted_date, date_format)
-                    worksheet.set_column('H:I', 18)
+                    # Combinar celdas A1 a F1
+                    worksheet.merge_range('A1:F1', f'BALANCE DE COMPROBACIÓN - FECHA: {self.extracted_date}', date_format)
                 
-                # Formatos
-                money_format = workbook.add_format({
-                    'num_format': '#,##0.00',
-                    'align': 'right'
-                })
-                
+                # Formatos para headers (ahora en la fila 2)
                 header_format = workbook.add_format({
                     'bold': True,
                     'text_wrap': True,
                     'valign': 'top',
                     'fg_color': '#D7E4BC',
-                    'border': 1
+                    'border': 1,
+                    'align': 'center'
                 })
                 
-                # Aplicar formatos
-                for col_num, value in enumerate(df.columns.values):
-                    worksheet.write(0, col_num, value, header_format)
+                # Formato para números
+                money_format = workbook.add_format({
+                    'num_format': '#,##0.00',
+                    'align': 'right'
+                })
                 
-                # Formatear columnas numéricas
+                # Escribir headers manualmente en la fila 2 (índice 1) con formato
+                headers = ['CODIGO', 'NOMBRE', 'SALDO_ANTERIOR', 'CARGOS', 'ABONOS', 'SALDO_ACTUAL']
+                for col_num, header in enumerate(headers):
+                    worksheet.write(1, col_num, header, header_format)
+                
+                # Formatear columnas numéricas (columnas C, D, E, F que corresponden a índices 2, 3, 4, 5)
                 for col_num in [2, 3, 4, 5]:  # Columnas de montos
                     col_letter = chr(65 + col_num)  # A=65, B=66, etc.
                     worksheet.set_column(f'{col_letter}:{col_letter}', 15, money_format)
@@ -447,6 +449,9 @@ class BalanceExtractorEnhanced:
                 # Ajustar ancho de columnas
                 worksheet.set_column('A:A', 12)  # CODIGO
                 worksheet.set_column('B:B', 35)  # NOMBRE
+                
+                # Ajustar altura de la primera fila para que se vea mejor la fecha
+                worksheet.set_row(0, 25)  # Fila 1 (índice 0) con altura 25
                 
                 # Agregar hoja de resumen
                 self._add_summary_sheet(writer, df)
@@ -487,7 +492,6 @@ class BalanceExtractorEnhanced:
             # Mostrar muestra de datos
             print(f"\n📋 Muestra de datos extraídos:")
             print(df.head(10).to_string(index=False, max_cols=6))
-            
         except Exception as e:
             logger.error(f"Error al crear Excel: {e}")
             raise
